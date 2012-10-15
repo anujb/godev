@@ -73,28 +73,32 @@ func startWatcher(watcher *fsnotify.Watcher, quit chan bool) {
 
 		for {
 			select {
-			case <-watcher.Event:
-				sem <- 1
+			case evt := <-watcher.Event:
 
-				go func() {
+				if evt.IsModify() {
 
-					//if already running proc, kill it
+					sem <- 1
 
-					if pid > 0 {
-						log.Println("Killing old process id", pid)
-						err := syscall.Kill(pid, 9)
+					go func() {
 
-						if err != nil {
-							log.Println("Unable to kill process!")
+						//if already running proc, kill it
+
+						if pid > 0 {
+							log.Println("Killing old process id", pid)
+							err := syscall.Kill(pid, 9)
+
+							if err != nil {
+								log.Println("Unable to kill process!")
+							}
 						}
-					}
 
-					// restart build and run steps
+						// restart build and run steps
 
-					startBuildAndRun()
+						startBuildAndRun()
 
-					<-sem
-				}()
+						<-sem
+					}()
+				}
 
 			case err := <-watcher.Error:
 				log.Println(err)
@@ -141,7 +145,7 @@ func startBuildAndRun() {
 	buildProc.Stderr = os.Stderr
 	buildProc.Stdout = os.Stdout
 
-	if err := buildProc.Start(); err != nil {
+	if err := buildProc.Run(); err != nil {
 		log.Printf("Build %q failed, with error %v\n", buildProc.Path, err)
 	}
 
