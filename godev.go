@@ -1,4 +1,4 @@
-package godev
+package main
 
 import (
 	"flag"
@@ -9,14 +9,16 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
 )
 
 var (
-	dir string
-	pid int
+	baseDir string
+	dir     string
+	pid     int
 )
 
 func init() {
@@ -24,6 +26,8 @@ func init() {
 	pid = 0
 	cwd, _ := os.Getwd()
 	flag.StringVar(&dir, "dir", cwd, "Directory to watch")
+
+	baseDir = filepath.Base(dir)
 
 	flag.Parse()
 }
@@ -39,7 +43,7 @@ func main() {
 		log.Fatalf("With error: ", err)
 	}
 
-	startCommand()
+	startBuildAndRun()
 
 	quitWatcher := make(chan bool)
 	startWatcher(watcher, quitWatcher)
@@ -74,6 +78,8 @@ func startWatcher(watcher *fsnotify.Watcher, quit chan bool) {
 
 				go func() {
 
+					//if already running proc, kill it
+
 					if pid > 0 {
 						log.Println("Killing old process id", pid)
 						err := syscall.Kill(pid, 9)
@@ -83,23 +89,9 @@ func startWatcher(watcher *fsnotify.Watcher, quit chan bool) {
 						}
 					}
 
-					argv := flag.Args()
+					// restart build and run steps
 
-					log.Println("Restarting app", argv[0])
-
-					proc := exec.Command("go", "run", argv[0])
-
-					proc.Stderr = os.Stderr
-					proc.Stdout = os.Stdout
-
-					log.Println("Starting app", argv[0])
-
-					if err := proc.Start(); err != nil {
-						log.Printf("Command %q failed, with error %v\n", proc.Path, err)
-						pid = 0
-					}
-
-					pid = proc.Process.Pid
+					startBuildAndRun()
 
 					<-sem
 				}()
@@ -140,23 +132,31 @@ func watchRecursive(dir string, watcher *fsnotify.Watcher) int {
 	return watched
 }
 
-func startCommand() {
+func startBuildAndRun() {
 
-	argv := flag.Args()
+	log.Println("Building app.", baseDir)
 
-	log.Println("Restarting app", argv[0])
+	buildProc := exec.Command("go", "build")
 
-	proc := exec.Command("go", "run", argv[0])
+	buildProc.Stderr = os.Stderr
+	buildProc.Stdout = os.Stdout
 
-	proc.Stderr = os.Stderr
-	proc.Stdout = os.Stdout
+	if err := buildProc.Start(); err != nil {
+		log.Printf("Build %q failed, with error %v\n", buildProc.Path, err)
+	}
 
-	log.Println("Starting app", argv[0])
+	absolutePath := path.Join(dir, baseDir)
+	startProc := exec.Command(absolutePath)
 
-	if err := proc.Start(); err != nil {
-		log.Printf("Command %q failed, with error %v\n", proc.Path, err)
+	startProc.Stderr = os.Stderr
+	startProc.Stdout = os.Stdout
+
+	log.Println("Starting app", baseDir)
+
+	if err := startProc.Start(); err != nil {
+		log.Printf("Command %q failed, with error %v\n", startProc.Path, err)
 		pid = 0
 	}
 
-	pid = proc.Process.Pid
+	pid = startProc.Process.Pid
 }
